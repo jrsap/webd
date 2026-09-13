@@ -1,4 +1,4 @@
-A simple but flexible webserver.
+# A simple but flexible webserver.
 
 ## Sample config:
 
@@ -31,11 +31,24 @@ A simple but flexible webserver.
 }
 ```
 
-all config keys are canonicallized into lower case strings with underscores removed, so you never have to worry about whether a setting
-is supposed to be named `private_key` or `privateKey` - both are equivalent to webd.
+All config keys are canonicalized into lower case strings with underscores removed, so you never have to worry about whether a setting
+is supposed to be named `private_key` or `privateKey` - both are equivalent to webd. Documentation and examples use camelCase.
+
+If two keys in the same object canonicalize to the same setting (`{ "privateKey": "a", "private_key": "b" }`), webd refuses to start.
+If the values are identical it only logs a warning and continues.
+
+## Route matching
+
+Route keys are directories, not string prefixes: `/sub_path` matches `/sub_path` and `/sub_path/x`, but never `/sub_path_b`.
+The longest matching route wins; `/` is the fallback.
 
 ## About webd
 
-webd is tiny webserver built in Go with minimal external dependencies. It compiles into a single static binary.
+webd is a tiny webserver written in Go with minimal external dependencies. It compiles into a single static binary.
 
-It can host static content, serve as an ingress proxy, or host applications packaged as container images using podman, docker or runc.
+It can host static content, act as an ingress proxy, or host applications packaged as container images using podman -
+rootless and daemonless, started as a subprocess. Runtimes sit behind a small interface, so docker support could follow later.
+
+With `autostart: true` a container is started as soon as its image has been pulled in the background at webd startup.
+With `autostart: false` it is started by the first request; concurrent requests wait for that single startup.
+After `idleTimeout` of no traffic the container is terminated.
