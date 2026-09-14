@@ -4,28 +4,22 @@
 
 ```
 {
-  443: {
+  "443": {
     "tls": {
       "certificate": "/etc/webd/server.crt",
       "privateKey": "/etc/webd/server.key"
     },
     "routes": {
-      "/": {
-        "path": "/var/www/",
-        "description": "static file hosting - Content-Type are inferred from extension or UNIX `file` command if available"
-      },
-      "/sub_path": {
-        "proxy": "http://localhost:8080",
-        "description": "forward request to another port or server, managed outside of webd"
-      },
-      "/sub_path_2": {
-        "container": {
-          "image": "quay.io/wvdschel/tafels:latest",
-          "idleTimeout": "5m",
-          "autostart": false,
-          "description": "path backed by a server from a container image, that is terminated after 5 minutes of no traffic, and is only started when a request is sent for the first time. Images are pulled in the background when webd starts."
-        }
-      }
+      "/": "/var/www",
+      "/sub_path": "http://localhost:8080",
+      "/sub_path_2": "tafels:3000"
+    }
+  },
+  "containers": {
+    "tafels": {
+      "image": "quay.io/wvdschel/tafels:latest",
+      "idleTimeout": "5m",
+      "autostart": false
     }
   }
 }
@@ -36,6 +30,13 @@ is supposed to be named `private_key` or `privateKey` - both are equivalent to w
 
 If two keys in the same object canonicalize to the same setting (`{ "privateKey": "a", "private_key": "b" }`), webd refuses to start.
 If the values are identical it only logs a warning and continues.
+
+## Route targets
+
+A route value is one string: `/…` serves that directory statically (Content-Type inferred from the extension, falling back to magic-byte
+sniffing), `http://…` or `https://…` proxies to that URL, and `name:port`
+routes to port `port` of the container named `name`, which must be defined in the top-level `containers` block (the only reserved
+key besides port numbers). Anything else is a startup error. Container names may contain letters, digits, `-` and `_`.
 
 ## Route matching
 
@@ -51,4 +52,8 @@ rootless and daemonless, started as a subprocess. Runtimes sit behind a small in
 
 With `autostart: true` a container is started as soon as its image has been pulled in the background at webd startup.
 With `autostart: false` it is started by the first request; concurrent requests wait for that single startup.
-After `idleTimeout` of no traffic the container is terminated.
+Startup is complete when the container accepts connections on its published ports, up to a 30 second timeout.
+After `idleTimeout` of no traffic on any route referencing it, the container is terminated.
+
+A container is defined once but can be referenced by many routes, on many listening ports: they all share one process and one
+lifecycle. Only the ports referenced by routes are published, bound to 127.0.0.1, so a container's other ports stay unreachable.
