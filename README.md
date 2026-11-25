@@ -46,7 +46,8 @@ key besides port numbers). Anything else is a startup error. Container names may
 
 A container's optional `volumes` array binds host directories into the container when it starts, as `podman run -v` flags.
 Each entry needs an absolute `host` path and an absolute `container` mount point; `readOnly: true` mounts it read-only (`:ro`).
-Each container destination may be mounted only once; anything invalid is a startup error.
+A missing `host` directory is created (mode 0755) just before the container starts; if it cannot be created the container
+fails to start. Each container destination may be mounted only once; anything invalid is a startup error.
 
 ## Route matching
 

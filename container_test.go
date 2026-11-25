@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"sync"
@@ -382,7 +384,7 @@ func TestContainerWaitsForReadiness(t *testing.T) {
 func TestContainerPassesVolumesToRuntime(t *testing.T) {
 	rt := &fakeRT{}
 	pub := testPorts(t)
-	vols := []Volume{{Host: "/srv/data", Container: "/data", ReadOnly: true}}
+	vols := []Volume{{Host: filepath.Join(t.TempDir(), "data"), Container: "/data", ReadOnly: true}}
 	sup := newTestSup(rt, ContainerConfig{Volumes: vols}, pub)
 	defer sup.Close()
 
@@ -391,6 +393,43 @@ func TestContainerPassesVolumesToRuntime(t *testing.T) {
 	}
 	if got := rt.lastVols(); !reflect.DeepEqual(got, vols) {
 		t.Fatalf("runtime got volumes %+v, want %+v", got, vols)
+	}
+}
+
+func TestContainerCreatesMissingVolumeDirs(t *testing.T) {
+	rt := &fakeRT{}
+	pub := testPorts(t)
+	dir := filepath.Join(t.TempDir(), "data", "nested")
+	vols := []Volume{{Host: dir, Container: "/data"}}
+	sup := newTestSup(rt, ContainerConfig{Volumes: vols}, pub)
+	defer sup.Close()
+
+	if rec := get(sup.Handler(3000), "/"); rec.Code != 200 {
+		t.Fatalf("got %d %q", rec.Code, rec.Body)
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		t.Fatalf("host dir %s was not created: %v", dir, err)
+	}
+}
+
+func TestContainerVolumeDirFailure(t *testing.T) {
+	rt := &fakeRT{}
+	pub := testPorts(t)
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// a path below a regular file can never be created as a directory
+	vols := []Volume{{Host: filepath.Join(blocker, "data"), Container: "/data"}}
+	sup := newTestSup(rt, ContainerConfig{Volumes: vols}, pub)
+	defer sup.Close()
+
+	rec := get(sup.Handler(3000), "/")
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("want 502, got %d %q", rec.Code, rec.Body)
+	}
+	if rt.started() != 0 {
+		t.Fatal("runtime must not start when a volume host dir cannot be created")
 	}
 }
 

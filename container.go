@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"sync"
 	"time"
 )
@@ -146,6 +147,9 @@ func (s *supervisor) start() {
 	err := s.rt.Pull(ctx, s.cfg.Image)
 	var proc Process
 	if err == nil {
+		err = ensureVolumeDirs(s.cfg.Volumes)
+	}
+	if err == nil {
 		proc, err = s.rt.Start(ctx, "webd-"+s.name, s.cfg.Image, s.publish, s.cfg.Volumes)
 	}
 	s.mu.Lock()
@@ -201,6 +205,17 @@ func (s *supervisor) start() {
 		s.signalLocked()
 	}
 	s.mu.Unlock()
+}
+
+// ensureVolumeDirs creates each volume's host directory if it does not exist
+// yet, so podman can bind-mount it into the container.
+func ensureVolumeDirs(vols []Volume) error {
+	for _, v := range vols {
+		if err := os.MkdirAll(v.Host, 0o755); err != nil {
+			return fmt.Errorf("volume host path %s: %w", v.Host, err)
+		}
+	}
+	return nil
 }
 
 // waitReady dials every published host port until all accept connections,

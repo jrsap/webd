@@ -258,7 +258,7 @@ func (rt *volsRuntime) gotVols() []Volume {
 func TestVolumesReachRuntimeThroughServer(t *testing.T) {
 	rt := &volsRuntime{}
 	p := freePort(t)
-	vols := []Volume{{Host: "/srv/data", Container: "/data"}}
+	vols := []Volume{{Host: filepath.Join(t.TempDir(), "data"), Container: "/data"}}
 	cfg := Config{
 		Ports:      map[uint16]*PortConfig{p: {Routes: map[string]*Target{"/app": {Container: "c", Port: 3000}}}},
 		Containers: map[string]*ContainerConfig{"c": {Image: "img", Volumes: vols}},
