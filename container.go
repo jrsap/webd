@@ -146,7 +146,7 @@ func (s *supervisor) start() {
 	err := s.rt.Pull(ctx, s.cfg.Image)
 	var proc Process
 	if err == nil {
-		proc, err = s.rt.Start(ctx, "webd-"+s.name, s.cfg.Image, s.publish)
+		proc, err = s.rt.Start(ctx, "webd-"+s.name, s.cfg.Image, s.publish, s.cfg.Volumes)
 	}
 	s.mu.Lock()
 	if err != nil {

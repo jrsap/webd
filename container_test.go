@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strconv"
 	"sync"
 	"testing"
@@ -59,6 +60,7 @@ type fakeRT struct {
 	fail   error
 	starts int
 	pulls  int
+	vols   []Volume // volumes of the last Start call
 }
 
 func (rt *fakeRT) Pull(context.Context, string) error {
@@ -68,9 +70,10 @@ func (rt *fakeRT) Pull(context.Context, string) error {
 	return nil
 }
 
-func (rt *fakeRT) Start(context.Context, string, string, map[uint16]uint16) (Process, error) {
+func (rt *fakeRT) Start(_ context.Context, _, _ string, _ map[uint16]uint16, vols []Volume) (Process, error) {
 	rt.mu.Lock()
 	rt.starts++
+	rt.vols = append([]Volume(nil), vols...)
 	gate, fail := rt.gate, rt.fail
 	rt.mu.Unlock()
 	if gate != nil {
@@ -99,6 +102,12 @@ func (rt *fakeRT) last() *fakeProc {
 		return nil
 	}
 	return rt.procs[len(rt.procs)-1]
+}
+
+func (rt *fakeRT) lastVols() []Volume {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.vols
 }
 
 func testPorts(t *testing.T) map[uint16]uint16 {
@@ -370,6 +379,21 @@ func TestContainerWaitsForReadiness(t *testing.T) {
 	}
 }
 
+func TestContainerPassesVolumesToRuntime(t *testing.T) {
+	rt := &fakeRT{}
+	pub := testPorts(t)
+	vols := []Volume{{Host: "/srv/data", Container: "/data", ReadOnly: true}}
+	sup := newTestSup(rt, ContainerConfig{Volumes: vols}, pub)
+	defer sup.Close()
+
+	if rec := get(sup.Handler(3000), "/"); rec.Code != 200 {
+		t.Fatalf("got %d %q", rec.Code, rec.Body)
+	}
+	if got := rt.lastVols(); !reflect.DeepEqual(got, vols) {
+		t.Fatalf("runtime got volumes %+v, want %+v", got, vols)
+	}
+}
+
 func TestContainerCloseStops(t *testing.T) {
 	rt := &fakeRT{}
 	pub := testPorts(t)
@@ -389,7 +413,7 @@ type crashOnceRT struct {
 	hostPort uint16
 }
 
-func (rt *crashOnceRT) Start(ctx context.Context, name, image string, publish map[uint16]uint16) (Process, error) {
+func (rt *crashOnceRT) Start(ctx context.Context, name, image string, publish map[uint16]uint16, _ []Volume) (Process, error) {
 	rt.mu.Lock()
 	first := rt.starts == 0
 	rt.starts++

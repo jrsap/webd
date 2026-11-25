@@ -2,6 +2,7 @@ package webd
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -204,3 +205,54 @@ func TestDescriptionRejected(t *testing.T) {
 	}
 }
 
+func TestVolumesParsed(t *testing.T) {
+	cfg, _, err := ParseConfig([]byte(`{
+	  "80": { "routes": { "/": "c:80" } },
+	  "containers": { "c": { "image": "i", "volumes": [
+	    { "host": "/srv/data", "container": "/data" },
+	    { "host": "/etc/app.conf", "container": "/etc/app.conf", "readOnly": true }
+	  ] } }
+	}`))
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	want := []Volume{
+		{Host: "/srv/data", Container: "/data"},
+		{Host: "/etc/app.conf", Container: "/etc/app.conf", ReadOnly: true},
+	}
+	if got := cfg.Containers["c"].Volumes; !reflect.DeepEqual(got, want) {
+		t.Fatalf("volumes: got %+v want %+v", got, want)
+	}
+}
+
+func TestVolumesAbsent(t *testing.T) {
+	cfg, _, err := ParseConfig([]byte(`{ "80": { "routes": { "/": "c:80" } }, "containers": { "c": { "image": "i" } } }`))
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	if v := cfg.Containers["c"].Volumes; len(v) != 0 {
+		t.Fatalf("want no volumes, got %+v", v)
+	}
+}
+
+func TestVolumeValidation(t *testing.T) {
+	for _, tt := range []struct{ name, volumes string }{
+		{"not an array", `"volumes": { "host": "/a", "container": "/b" }`},
+		{"null", `"volumes": null`},
+		{"volume not an object", `"volumes": ["/a:/b"]`},
+		{"volume not a string field", `"volumes": [{ "host": 5, "container": "/b" }]`},
+		{"missing host", `"volumes": [{ "container": "/b" }]`},
+		{"missing container", `"volumes": [{ "host": "/a" }]`},
+		{"empty host", `"volumes": [{ "host": "", "container": "/b" }]`},
+		{"relative host", `"volumes": [{ "host": "data", "container": "/b" }]`},
+		{"relative container", `"volumes": [{ "host": "/a", "container": "b" }]`},
+		{"readonly not a bool", `"volumes": [{ "host": "/a", "container": "/b", "readonly": "yes" }]`},
+		{"unknown key", `"volumes": [{ "host": "/a", "container": "/b", "mode": "ro" }]`},
+		{"duplicate destination", `"volumes": [{ "host": "/a", "container": "/b" }, { "host": "/c", "container": "/b" }]`},
+	} {
+		in := `{ "80": { "routes": { "/": "c:80" } }, "containers": { "c": { "image": "i", ` + tt.volumes + ` } } }`
+		if _, _, err := ParseConfig([]byte(in)); err == nil {
+			t.Errorf("%s: want error, got none", tt.name)
+		}
+	}
+}

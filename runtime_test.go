@@ -33,7 +33,7 @@ func TestPodmanPullArgs(t *testing.T) {
 func TestPodmanStartArgs(t *testing.T) {
 	var got [][]string
 	rt := &Podman{Bin: "podman", Runner: fakeRunner(&got)}
-	p, err := rt.Start(context.Background(), "webd-tafels", "quay.io/x/tafels:latest", map[uint16]uint16{3000: 20001, 9090: 20002})
+	p, err := rt.Start(context.Background(), "webd-tafels", "quay.io/x/tafels:latest", map[uint16]uint16{3000: 20001, 9090: 20002}, nil)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestPodmanStartArgs(t *testing.T) {
 func TestPodmanStop(t *testing.T) {
 	var got [][]string
 	rt := &Podman{Bin: "podman", Runner: fakeRunner(&got)}
-	p, err := rt.Start(context.Background(), "webd-x", "img", map[uint16]uint16{80: 20000})
+	p, err := rt.Start(context.Background(), "webd-x", "img", map[uint16]uint16{80: 20000}, nil)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -61,5 +61,34 @@ func TestPodmanStop(t *testing.T) {
 	line := strings.Join(got[len(got)-1], " ")
 	if !strings.Contains(line, "podman kill webd-x") {
 		t.Fatalf("want kill, got %q", line)
+	}
+}
+
+func TestPodmanStartVolumeArgs(t *testing.T) {
+	var got [][]string
+	rt := &Podman{Bin: "podman", Runner: fakeRunner(&got)}
+	vols := []Volume{
+		{Host: "/srv/data", Container: "/data"},
+		{Host: "/etc/app.conf", Container: "/etc/app.conf", ReadOnly: true},
+	}
+	p, err := rt.Start(context.Background(), "webd-x", "img", map[uint16]uint16{80: 20000}, vols)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if p == nil {
+		t.Fatal("no process")
+	}
+	line := strings.Join(got[0], " ")
+	for _, want := range []string{
+		"-v /srv/data:/data ",
+		"-v /etc/app.conf:/etc/app.conf:ro ",
+	} {
+		if !strings.Contains(line, want) {
+			t.Errorf("argv %q missing %q", line, want)
+		}
+	}
+	// volumes must come before the image argument
+	if strings.Index(line, "-v /srv/data:/data") > strings.Index(line, " img") {
+		t.Errorf("-v must precede the image in argv %q", line)
 	}
 }
