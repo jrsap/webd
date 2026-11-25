@@ -18,8 +18,9 @@ type Process interface {
 type Runtime interface {
 	Pull(ctx context.Context, image string) error
 	// Start runs image publishing each containerPort on its assigned host port
-	// at 127.0.0.1, under the given container name.
-	Start(ctx context.Context, name, image string, publish map[uint16]uint16) (Process, error)
+	// at 127.0.0.1, under the given container name, with each Volume's Host
+	// directory mounted at its Container path.
+	Start(ctx context.Context, name, image string, publish map[uint16]uint16, vols []Volume) (Process, error)
 }
 
 type Podman struct {
@@ -50,7 +51,7 @@ func (p *Podman) Pull(ctx context.Context, image string) error {
 	return proc.Wait()
 }
 
-func (p *Podman) Start(ctx context.Context, name, image string, publish map[uint16]uint16) (Process, error) {
+func (p *Podman) Start(ctx context.Context, name, image string, publish map[uint16]uint16, vols []Volume) (Process, error) {
 	args := []string{"run", "--rm", "--name", name}
 	ports := make([]uint16, 0, len(publish))
 	for c := range publish {
@@ -59,6 +60,13 @@ func (p *Podman) Start(ctx context.Context, name, image string, publish map[uint
 	sort.Slice(ports, func(i, j int) bool { return ports[i] < ports[j] })
 	for _, c := range ports {
 		args = append(args, "-p", fmt.Sprintf("127.0.0.1:%d:%d", publish[c], c))
+	}
+	for _, v := range vols {
+		spec := v.Host + ":" + v.Container
+		if v.ReadOnly {
+			spec += ":ro"
+		}
+		args = append(args, "-v", spec)
 	}
 	args = append(args, image)
 	proc, err := p.runner()(ctx, p.bin(), args...)

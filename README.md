@@ -19,7 +19,11 @@
     "tafels": {
       "image": "quay.io/wvdschel/tafels:latest",
       "idleTimeout": "5m",
-      "autostart": false
+      "autostart": false,
+      "volumes": [
+        { "host": "/srv/tafels/data", "container": "/data" },
+        { "host": "/etc/tafels.conf", "container": "/etc/tafels.conf", "readOnly": true }
+      ]
     }
   }
 }
@@ -37,6 +41,13 @@ A route value is one string: `/…` serves that directory statically (Content-Ty
 sniffing), `http://…` or `https://…` proxies to that URL, and `name:port`
 routes to port `port` of the container named `name`, which must be defined in the top-level `containers` block (the only reserved
 key besides port numbers). Anything else is a startup error. Container names may contain letters, digits, `-` and `_`.
+
+## Container volumes
+
+A container's optional `volumes` array binds host directories into the container when it starts, as `podman run -v` flags.
+Each entry needs an absolute `host` path and an absolute `container` mount point; `readOnly: true` mounts it read-only (`:ro`).
+A missing `host` directory is created (mode 0755) just before the container starts; if it cannot be created the container
+fails to start. Each container destination may be mounted only once; anything invalid is a startup error.
 
 ## Route matching
 

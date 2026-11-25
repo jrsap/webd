@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -168,7 +169,7 @@ func (rt *e2eRuntime) Pull(context.Context, string) error {
 	return nil
 }
 
-func (rt *e2eRuntime) Start(_ context.Context, _, _ string, publish map[uint16]uint16) (Process, error) {
+func (rt *e2eRuntime) Start(_ context.Context, _, _ string, publish map[uint16]uint16, _ []Volume) (Process, error) {
 	var servers []*http.Server
 	var listeners []net.Listener
 	for _, h := range publish {
@@ -232,6 +233,50 @@ func TestServeContainerRoute(t *testing.T) {
 	}
 	if code, body, err := fetch(fmt.Sprintf("http://127.0.0.1:%d/m", p), false); err != nil || code != 200 || body != "container /m" {
 		t.Fatalf("second port route: %d %q %v", code, body, err)
+	}
+}
+
+type volsRuntime struct {
+	e2eRuntime
+	mu   sync.Mutex
+	vols []Volume
+}
+
+func (rt *volsRuntime) Start(ctx context.Context, name, image string, publish map[uint16]uint16, vols []Volume) (Process, error) {
+	rt.mu.Lock()
+	rt.vols = append([]Volume(nil), vols...)
+	rt.mu.Unlock()
+	return rt.e2eRuntime.Start(ctx, name, image, publish, nil)
+}
+
+func (rt *volsRuntime) gotVols() []Volume {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.vols
+}
+
+func TestVolumesReachRuntimeThroughServer(t *testing.T) {
+	rt := &volsRuntime{}
+	p := freePort(t)
+	vols := []Volume{{Host: filepath.Join(t.TempDir(), "data"), Container: "/data"}}
+	cfg := Config{
+		Ports:      map[uint16]*PortConfig{p: {Routes: map[string]*Target{"/app": {Container: "c", Port: 3000}}}},
+		Containers: map[string]*ContainerConfig{"c": {Image: "img", Volumes: vols}},
+	}
+	srv, err := New(cfg, Options{Runtime: rt, Log: testLog()})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := srv.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer srv.Shutdown(context.Background())
+
+	if code, _, err := fetch(fmt.Sprintf("http://127.0.0.1:%d/app", p), false); err != nil || code != 200 {
+		t.Fatalf("container route: %d %v", code, err)
+	}
+	if got := rt.gotVols(); !reflect.DeepEqual(got, vols) {
+		t.Fatalf("runtime got volumes %+v, want %+v", got, vols)
 	}
 }
 

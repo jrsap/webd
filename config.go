@@ -36,10 +36,18 @@ type Target struct {
 	Port      uint16
 }
 
+// Volume binds a host directory into a container at Container.
+type Volume struct {
+	Host      string // absolute path on the host
+	Container string // absolute mount point inside the container
+	ReadOnly  bool
+}
+
 type ContainerConfig struct {
 	Image       string
 	IdleTimeout time.Duration
 	Autostart   bool
+	Volumes     []Volume
 }
 
 var containerName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -96,7 +104,7 @@ func (p *parser) containers(raw json.RawMessage) map[string]*ContainerConfig {
 
 func (p *parser) containerConfig(raw json.RawMessage, ctx string) *ContainerConfig {
 	obj := p.object(raw, ctx)
-	p.known(ctx, obj, "image", "idletimeout", "autostart")
+	p.known(ctx, obj, "image", "idletimeout", "autostart", "volumes")
 	c := &ContainerConfig{}
 	if v, ok := obj["image"]; ok {
 		c.Image = p.string(ctx+".image", v)
@@ -112,7 +120,55 @@ func (p *parser) containerConfig(raw json.RawMessage, ctx string) *ContainerConf
 	if v, ok := obj["autostart"]; ok {
 		c.Autostart = p.bool(ctx+".autostart", v)
 	}
+	if v, ok := obj["volumes"]; ok {
+		c.Volumes = p.volumes(ctx+".volumes", v)
+	}
 	return c
+}
+
+// volumes parses the container's "volumes" array: objects with "host" and
+// "container" paths plus an optional "readOnly" flag. Both paths must be
+// absolute and each container destination may be mounted only once.
+func (p *parser) volumes(ctx string, raw json.RawMessage) []Volume {
+	var raws []json.RawMessage
+	p.decode(ctx, raw, &raws)
+	if raws == nil {
+		p.fail(ctx, "must be an array of { \"host\", \"container\", \"readOnly\"? } objects")
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]Volume, 0, len(raws))
+	for i, r := range raws {
+		ictx := fmt.Sprintf("%s[%d]", ctx, i)
+		obj := p.object(r, ictx)
+		p.known(ictx, obj, "host", "container", "readonly")
+		v := Volume{}
+		if h, ok := obj["host"]; ok {
+			v.Host = p.string(ictx+".host", h)
+		}
+		if c, ok := obj["container"]; ok {
+			v.Container = p.string(ictx+".container", c)
+		}
+		if ro, ok := obj["readonly"]; ok {
+			v.ReadOnly = p.bool(ictx+".readonly", ro)
+		}
+		if v.Host == "" || v.Container == "" {
+			p.fail(ictx, "\"host\" and \"container\" are both required")
+			continue
+		}
+		if !strings.HasPrefix(v.Host, "/") {
+			p.fail(ictx+".host", "%q must be an absolute path", v.Host)
+		}
+		if !strings.HasPrefix(v.Container, "/") {
+			p.fail(ictx+".container", "%q must be an absolute path", v.Container)
+		}
+		if seen[v.Container] {
+			p.fail(ictx+".container", "%q is mounted more than once", v.Container)
+		}
+		seen[v.Container] = true
+		out = append(out, v)
+	}
+	return out
 }
 
 // checkRefs reports route targets that reference undefined containers and
